@@ -1,0 +1,27 @@
+---
+compiled_package_info:
+  package_name: Examples
+  address_alias_instantiation:
+    Extensions: "0000000000000000000000000000000000000000000000000000000000000001"
+    HelloBlockchain: 06de8a991b1a881c2c1637b810aae0ea40ab52cbca67bfd93be78e06faa43f60
+    aptos_framework: "0000000000000000000000000000000000000000000000000000000000000001"
+    aptos_std: "0000000000000000000000000000000000000000000000000000000000000001"
+    core_resources: 000000000000000000000000000000000000000000000000000000000a550c18
+    std: "0000000000000000000000000000000000000000000000000000000000000001"
+    vm_reserved: "0000000000000000000000000000000000000000000000000000000000000000"
+  source_digest: 0C1BACBD6629B85AA6A415473E714A83523C8479172706928D6571A6E4B1A94C
+  build_flags:
+    dev_mode: false
+    test_mode: false
+    generate_docs: true
+    generate_abis: true
+    install_dir: ~
+    force_recompilation: false
+    additional_named_addresses:
+      HelloBlockchain: 06de8a991b1a881c2c1637b810aae0ea40ab52cbca67bfd93be78e06faa43f60
+    architecture: ~
+    fetch_deps_only: false
+dependencies:
+  - AptosFramework
+  - AptosStdlib
+  - MoveStdlib

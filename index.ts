@@ -1,69 +1,71 @@
 // Copyright (c) The Aptos Foundation
 // SPDX-License-Identifier: Apache-2.0
 
-export const NODE_URL = "https://fullnode.devnet.aptoslabs.com";
-export const FAUCET_URL = "https://faucet.devnet.aptoslabs.com";
+import assert from "assert";
+import fs from "fs";
+import { NODE_URL, FAUCET_URL, accountBalance } from "./first_transaction";
+import { AptosAccount, TxnBuilderTypes, BCS, MaybeHexString, HexString, AptosClient, FaucetClient } from "aptos";
+
+const readline = require("readline").createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
 //:!:>section_1
+const client = new AptosClient(NODE_URL);
+const faucetClient = new FaucetClient(NODE_URL, FAUCET_URL);
 
-/** AptosAccount provides methods around addresses, key-pairs */
-import { AptosAccount, TxnBuilderTypes, BCS, MaybeHexString } from "aptos";
+/** Publish a new module to the blockchain within the specified account */
+export async function publishModule(accountFrom: AptosAccount, moduleHex: string): Promise<string> {
+  const moudleBundlePayload = new TxnBuilderTypes.TransactionPayloadModuleBundle(
+    new TxnBuilderTypes.ModuleBundle([new TxnBuilderTypes.Module(new HexString(moduleHex).toUint8Array())]),
+  );
 
+  const [{ sequence_number: sequenceNumber }, chainId] = await Promise.all([
+    client.getAccount(accountFrom.address()),
+    client.getChainId(),
+  ]);
+
+  const rawTxn = new TxnBuilderTypes.RawTransaction(
+    TxnBuilderTypes.AccountAddress.fromHex(accountFrom.address()),
+    BigInt(sequenceNumber),
+    moudleBundlePayload,
+    1000n,
+    1n,
+    BigInt(Math.floor(Date.now() / 1000) + 10),
+    new TxnBuilderTypes.ChainId(chainId),
+  );
+
+  const bcsTxn = AptosClient.generateBCSTransaction(accountFrom, rawTxn);
+  const transactionRes = await client.submitSignedBCSTransaction(bcsTxn);
+
+  return transactionRes.hash;
+}
 //<:!:section_1
-
 //:!:>section_2
-/** Wrappers around the Aptos Node and Faucet API */
-import { AptosClient, FaucetClient } from "aptos";
+/** Retrieve the resource Message::MessageHolder::message */
+async function getMessage(contractAddress: HexString, accountAddress: MaybeHexString): Promise<string> {
+  try {
+    const resource = await client.getAccountResource(
+      accountAddress,
+      `${contractAddress.toString()}::message::MessageHolder`,
+    );
+    return (resource as any).data["message"];
+  } catch (_) {
+    return "";
+  }
+}
 
 //<:!:section_2
 //:!:>section_3
-const client = new AptosClient(NODE_URL);
-/**
- * https://aptos-labs.github.io/ts-sdk-doc/classes/AptosClient.html#getAccount
- * returns the sequence number and authentication key for an account
- *
- * https://aptos-labs.github.io/ts-sdk-doc/classes/AptosClient.html#getAccountResource
- * returns all resources associated with the account
- */
-
-//<:!:section_3
-
-//:!:>section_4
-/**
- * https://aptos-labs.github.io/ts-sdk-doc/classes/AptosClient.html#generateBCSTransaction
- * signs a raw transaction, which can be submitted to the blockchain.
- */
-
-/**
- * https://aptos-labs.github.io/ts-sdk-doc/classes/AptosClient.html#submitSignedBCSTransaction
- * submits a signed transaction to the blockchain.
- */
-
-//<:!:section_4
-//:!:>section_5
-/** Helper method returns the coin balance associated with the account */
-export async function accountBalance(accountAddress: MaybeHexString): Promise<number | null> {
-  const resource = await client.getAccountResource(accountAddress, "0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>");
-  if (resource == null) {
-    return null;
-  }
-
-  return parseInt((resource.data as any)["coin"]["value"]);
-}
-
-/**
- * Transfers a given coin amount from a given accountFrom to the recipient's account address.
- * Returns the transaction hash of the transaction used to transfer.
- */
-async function transfer(accountFrom: AptosAccount, recipient: MaybeHexString, amount: number): Promise<string> {
-  const token = new TxnBuilderTypes.TypeTagStruct(TxnBuilderTypes.StructTag.fromString("0x1::aptos_coin::AptosCoin"));
-
+/**  Potentially initialize and set the resource Message::MessageHolder::message */
+async function setMessage(contractAddress: HexString, accountFrom: AptosAccount, message: string): Promise<string> {
   const scriptFunctionPayload = new TxnBuilderTypes.TransactionPayloadScriptFunction(
     TxnBuilderTypes.ScriptFunction.natural(
-      "0x1::coin",
-      "transfer",
-      [token],
-      [BCS.bcsToBytes(TxnBuilderTypes.AccountAddress.fromHex(recipient)), BCS.bcsSerializeUint64(amount)],
+      `${contractAddress.toString()}::message`,
+      "set_message",
+      [],
+      [BCS.bcsSerializeStr(message)],
     ),
   );
 
@@ -83,47 +85,63 @@ async function transfer(accountFrom: AptosAccount, recipient: MaybeHexString, am
   );
 
   const bcsTxn = AptosClient.generateBCSTransaction(accountFrom, rawTxn);
-  const pendingTxn = await client.submitSignedBCSTransaction(bcsTxn);
+  const transactionRes = await client.submitSignedBCSTransaction(bcsTxn);
 
-  return pendingTxn.hash;
+  return transactionRes.hash;
 }
+//<:!:section_3
 
-//<:!:section_5
-//:!:>section_6
-/** Faucet creates and funds accounts. */
-const faucetClient = new FaucetClient(NODE_URL, FAUCET_URL);
-
-//<:!:section_6
-//:!:>section_7
 /** run our demo! */
 async function main() {
+  assert(process.argv.length == 3, "Expecting an argument that points to the helloblockchain module");
+
   // Create two accounts, Alice and Bob, and fund Alice but not Bob
   const alice = new AptosAccount();
   const bob = new AptosAccount();
 
   console.log("\n=== Addresses ===");
-  console.log(
-    `Alice: ${alice.address()}. Key Seed: ${Buffer.from(alice.signingKey.secretKey).toString("hex").slice(0, 64)}`,
-  );
-  console.log(`Bob: ${bob.address()}. Key Seed: ${Buffer.from(bob.signingKey.secretKey).toString("hex").slice(0, 64)}`);
+  console.log(`Alice: ${alice.address()}`);
+  console.log(`Bob: ${bob.address()}`);
 
   await faucetClient.fundAccount(alice.address(), 5_000);
-  await faucetClient.fundAccount(bob.address(), 0);
+  await faucetClient.fundAccount(bob.address(), 5_000);
 
   console.log("\n=== Initial Balances ===");
   console.log(`Alice: ${await accountBalance(alice.address())}`);
   console.log(`Bob: ${await accountBalance(bob.address())}`);
 
-  // Have Alice give Bob 1000 coins
-  const txHash = await transfer(alice, bob.address(), 1_000);
-  await client.waitForTransaction(txHash);
+  await new Promise<void>((resolve) => {
+    readline.question(
+      "Update the module with Alice's address, build, copy to the provided path, and press enter.",
+      () => {
+        resolve();
+        readline.close();
+      },
+    );
+  });
+  const modulePath = process.argv[2];
+  const moduleHex = fs.readFileSync(modulePath).toString("hex");
 
-  console.log("\n=== Final Balances ===");
-  console.log(`Alice: ${await accountBalance(alice.address())}`);
-  console.log(`Bob: ${await accountBalance(bob.address())}`);
+  console.log("\n=== Testing Alice ===");
+  console.log("Publishing...");
+
+  let txHash = await publishModule(alice, moduleHex);
+  await client.waitForTransaction(txHash);
+  console.log(`Initial value: ${await getMessage(alice.address(), alice.address())}`);
+
+  console.log('Setting the message to "Hello, Blockchain"');
+  txHash = await setMessage(alice.address(), alice, "Hello, Blockchain");
+  await client.waitForTransaction(txHash);
+  console.log(`New value: ${await getMessage(alice.address(), alice.address())}`);
+
+  console.log("\n=== Testing Bob ===");
+  console.log(`Initial value: ${await getMessage(alice.address(), bob.address())}`);
+  console.log('Setting the message to "Hello, Blockchain"');
+  txHash = await setMessage(alice.address(), bob, "Hello, Blockchain");
+  await client.waitForTransaction(txHash);
+  console.log(`New value: ${await getMessage(alice.address(), bob.address())}`);
 }
 
 if (require.main === module) {
   main().then((resp) => console.log(resp));
 }
-//<:!:section_7
